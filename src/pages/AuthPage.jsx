@@ -32,16 +32,28 @@ export default function AuthPage({ mode }) {
       return;
     }
     setBusy(true);
-    try {
-      if (isLogin) await signIn(email, password);
-      else await signUp(name, email, password);
-      navigate(from, { replace: true });
-    } catch (err) {
-      setError(err.message);
+try {
+  if (isLogin) {
+    await signIn(email, password);
+    navigate(from, { replace: true });
+  } else {
+    const result = await signUp(name, email, password);
+  
+    if (result.needsEmailConfirmation) {
+      setError(
+        'Account created. Check your email to confirm your account, then sign in.'
+      );
       setBusy(false);
+      return;
     }
-  };
 
+    navigate(from, { replace: true });
+  }
+} catch (err) {
+  setError(err.message);
+  setBusy(false);
+}
+  }
   return (
     <div className="grid min-h-screen lg:grid-cols-2">
       <aside className="auth-visual relative hidden flex-col justify-between overflow-hidden bg-navy p-12 text-white lg:flex">
@@ -112,20 +124,7 @@ export default function AuthPage({ mode }) {
             {busy ? (isLogin ? 'Signing in…' : 'Creating account…') : isLogin ? 'Sign in' : 'Create account'}
           </button>
 
-          {isLogin && (
-            <div className="rounded-lg border border-line bg-white p-3 text-sm text-ink-soft">
-              Trying the mock backend? Use <span className="font-medium text-ink">demo@gyarados.test</span> with
-              password <span className="font-medium text-ink">demo1234</span>.
-              <button
-                type="button"
-                className="mt-2 block font-medium text-teal hover:underline"
-                onClick={() => { setEmail('demo@gyarados.test'); setPassword('demo1234'); }}
-              >
-                Fill in the demo account
-              </button>
-            </div>
-          )}
-
+    
           <p className="text-center text-sm text-ink-soft">
             {isLogin ? 'New to Gyarados?' : 'Already have an account?'}{' '}
             <Link to={isLogin ? '/register' : '/login'} state={location.state} className="font-medium text-teal hover:underline">

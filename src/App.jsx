@@ -1,3 +1,4 @@
+import Chatbot from './components/Chatbot.jsx';
 import { Navigate, Outlet, Route, Routes, useLocation } from 'react-router-dom';
 import Sidebar from './components/Sidebar.jsx';
 import Topbar from './components/Topbar.jsx';
@@ -15,13 +16,15 @@ function Shell() {
     <div className="min-h-screen">
       <Sidebar />
       <Topbar />
+
       <main className="mx-auto w-full max-w-[1440px] flex-1 px-4 py-7 sm:px-8 lg:py-9">
         <Outlet />
       </main>
+
+      <Chatbot />
     </div>
   );
 }
-
 // Anyone who is not signed in is sent to /login and returned here afterwards
 function RequireAuth() {
   const { user, loading } = useAuth();
