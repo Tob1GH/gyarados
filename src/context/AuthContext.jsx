@@ -7,23 +7,15 @@ import {
   useMemo,
   useState,
 } from 'react';
-<<<<<<< Updated upstream
+
 import { supabase } from '../lib/supabaseClient.js';
-=======
-
-import {
-  api,
-  setUnauthorizedHandler,
-  tokenStore,
-} from '../api/client.js';
-
 import { validateRegistration } from '../utils/censorship.js';
->>>>>>> Stashed changes
 
 const AuthCtx = createContext(null);
 
 export const useAuth = () => useContext(AuthCtx);
 
+// Normalize Supabase user data
 function normalizeUser(user) {
   if (!user) return null;
 
@@ -39,22 +31,24 @@ function normalizeUser(user) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-<<<<<<< Updated upstream
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
+  // CHECK EXISTING SESSION
   useEffect(() => {
     let mounted = true;
 
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, nextSession) => {
-      if (!mounted) return;
+    } = supabase.auth.onAuthStateChange(
+      (_event, nextSession) => {
+        if (!mounted) return;
 
-      setSession(nextSession);
-      setUser(normalizeUser(nextSession?.user ?? null));
-      setLoading(false);
-    });
+        setSession(nextSession);
+        setUser(normalizeUser(nextSession?.user ?? null));
+        setLoading(false);
+      }
+    );
 
     supabase.auth
       .getSession()
@@ -66,13 +60,16 @@ export function AuthProvider({ children }) {
           setUser(null);
         } else {
           setSession(data.session);
-          setUser(normalizeUser(data.session?.user ?? null));
+          setUser(
+            normalizeUser(data.session?.user ?? null)
+          );
         }
 
         setLoading(false);
       })
       .catch(() => {
         if (!mounted) return;
+
         setSession(null);
         setUser(null);
         setLoading(false);
@@ -84,38 +81,62 @@ export function AuthProvider({ children }) {
     };
   }, []);
 
+  // LOGIN
   const signIn = useCallback(async (email, password) => {
-    const { data, error } = await supabase.auth.signInWithPassword({
-      email,
-      password,
-    });
+    const { data, error } =
+      await supabase.auth.signInWithPassword({
+        email,
+        password,
+      });
 
-    if (error) throw error;
+    if (error) {
+      throw error;
+    }
+
     return normalizeUser(data.user);
   }, []);
 
-  const signUp = useCallback(async (name, email, password) => {
-    const { data, error } = await supabase.auth.signUp({
-      email,
-      password,
-      options: {
-        data: { full_name: name },
-      },
-    });
+  // SIGN UP WITH CENSORSHIP
+  const signUp = useCallback(
+    async (name, email, password) => {
+      // Check for inappropriate words
+      // in name, email, and password
+      validateRegistration(name, email, password);
 
-    if (error) throw error;
+      // Proceed only if validation passes
+      const { data, error } =
+        await supabase.auth.signUp({
+          email,
+          password,
+          options: {
+            data: {
+              full_name: name,
+            },
+          },
+        });
 
-    return {
-      user: normalizeUser(data.user),
-      needsEmailConfirmation: !data.session,
-    };
-  }, []);
+      if (error) {
+        throw error;
+      }
 
+      return {
+        user: normalizeUser(data.user),
+        needsEmailConfirmation: !data.session,
+      };
+    },
+    []
+  );
+
+  // LOGOUT
   const signOut = useCallback(async () => {
     const { error } = await supabase.auth.signOut();
-    if (error) throw error;
+
+    if (error) {
+      throw error;
+    }
   }, []);
 
+  // AUTH CONTEXT VALUES
   const value = useMemo(
     () => ({
       user,
@@ -125,71 +146,14 @@ export function AuthProvider({ children }) {
       signUp,
       signOut,
     }),
-    [user, session, loading, signIn, signUp, signOut]
-=======
-
-  // Check existing login session
-  const [loading, setLoading] = useState(
-    Boolean(tokenStore.get())
-  );
-
-  const clearSession = useCallback(() => {
-    tokenStore.clear();
-    setUser(null);
-  }, []);
-
-  useEffect(() => {
-    setUnauthorizedHandler(clearSession);
-
-    if (!tokenStore.get()) return;
-
-    api.me()
-      .then(setUser)
-      .catch(clearSession)
-      .finally(() => setLoading(false));
-  }, [clearSession]);
-
-  const value = useMemo(
-    () => ({
+    [
       user,
+      session,
       loading,
-
-      // LOGIN
-      async signIn(email, password) {
-        const res = await api.login({
-          email,
-          password,
-        });
-
-        tokenStore.set(res.token);
-        setUser(res.user);
-      },
-
-      // SIGN UP WITH CENSORSHIP
-      async signUp(name, email, password) {
-        // Check inappropriate words before registration
-        validateRegistration(name, email, password);
-
-        // Only register if validation passes
-        const res = await api.register({
-          name,
-          email,
-          password,
-        });
-
-        tokenStore.set(res.token);
-        setUser(res.user);
-      },
-
-      // LOGOUT
-      signOut() {
-        api.logout().catch(() => {});
-
-        clearSession();
-      },
-    }),
-    [user, loading, clearSession]
->>>>>>> Stashed changes
+      signIn,
+      signUp,
+      signOut,
+    ]
   );
 
   return (
