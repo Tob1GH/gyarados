@@ -7,7 +7,18 @@ import {
   useMemo,
   useState,
 } from 'react';
+<<<<<<< Updated upstream
 import { supabase } from '../lib/supabaseClient.js';
+=======
+
+import {
+  api,
+  setUnauthorizedHandler,
+  tokenStore,
+} from '../api/client.js';
+
+import { validateRegistration } from '../utils/censorship.js';
+>>>>>>> Stashed changes
 
 const AuthCtx = createContext(null);
 
@@ -28,6 +39,7 @@ function normalizeUser(user) {
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
+<<<<<<< Updated upstream
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -114,6 +126,70 @@ export function AuthProvider({ children }) {
       signOut,
     }),
     [user, session, loading, signIn, signUp, signOut]
+=======
+
+  // Check existing login session
+  const [loading, setLoading] = useState(
+    Boolean(tokenStore.get())
+  );
+
+  const clearSession = useCallback(() => {
+    tokenStore.clear();
+    setUser(null);
+  }, []);
+
+  useEffect(() => {
+    setUnauthorizedHandler(clearSession);
+
+    if (!tokenStore.get()) return;
+
+    api.me()
+      .then(setUser)
+      .catch(clearSession)
+      .finally(() => setLoading(false));
+  }, [clearSession]);
+
+  const value = useMemo(
+    () => ({
+      user,
+      loading,
+
+      // LOGIN
+      async signIn(email, password) {
+        const res = await api.login({
+          email,
+          password,
+        });
+
+        tokenStore.set(res.token);
+        setUser(res.user);
+      },
+
+      // SIGN UP WITH CENSORSHIP
+      async signUp(name, email, password) {
+        // Check inappropriate words before registration
+        validateRegistration(name, email, password);
+
+        // Only register if validation passes
+        const res = await api.register({
+          name,
+          email,
+          password,
+        });
+
+        tokenStore.set(res.token);
+        setUser(res.user);
+      },
+
+      // LOGOUT
+      signOut() {
+        api.logout().catch(() => {});
+
+        clearSession();
+      },
+    }),
+    [user, loading, clearSession]
+>>>>>>> Stashed changes
   );
 
   return (
