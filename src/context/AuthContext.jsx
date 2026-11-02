@@ -8,152 +8,149 @@ import {
   useState,
 } from 'react';
 
-import { supabase } from '../lib/supabaseClient.js';
+import {
+  api,
+  tokenStore,
+  setUnauthorizedHandler,
+} from '../api/client.js';
+
 import { validateRegistration } from '../utils/censorship.js';
 
 const AuthCtx = createContext(null);
 
 export const useAuth = () => useContext(AuthCtx);
 
-// Normalize Supabase user data
-function normalizeUser(user) {
-  if (!user) return null;
-
-  return {
-    id: user.id,
-    email: user.email,
-    name:
-      user.user_metadata?.full_name ||
-      user.email?.split('@')[0] ||
-      'Member',
-  };
-}
-
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
-  const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // CHECK EXISTING SESSION
+  // CHECK EXISTING BACKEND SESSION
   useEffect(() => {
-    let mounted = true;
+    let active = true;
 
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(
-      (_event, nextSession) => {
-        if (!mounted) return;
+    setUnauthorizedHandler(() => {
+      tokenStore.clear();
+      if (active) setUser(null);
+    });
 
-        setSession(nextSession);
-        setUser(normalizeUser(nextSession?.user ?? null));
-        setLoading(false);
-      }
-    );
-
-    supabase.auth
-      .getSession()
-      .then(({ data, error }) => {
-        if (!mounted) return;
-
-        if (error) {
-          setSession(null);
-          setUser(null);
-        } else {
-          setSession(data.session);
-          setUser(
-            normalizeUser(data.session?.user ?? null)
-          );
+    async function checkSession() {
+      try {
+        if (!tokenStore.get()) {
+          if (active) setUser(null);
+          return;
         }
 
-        setLoading(false);
-      })
-      .catch(() => {
-        if (!mounted) return;
+        const data = await api.me();
 
-        setSession(null);
-        setUser(null);
-        setLoading(false);
-      });
+        if (active) {
+          setUser(data.user ?? data);
+        }
+      } catch (error) {
+        console.error('Session check failed:', error);
+        tokenStore.clear();
+
+        if (active) setUser(null);
+      } finally {
+        if (active) setLoading(false);
+      }
+    }
+
+    checkSession();
 
     return () => {
-      mounted = false;
-      subscription.unsubscribe();
+      active = false;
+      setUnauthorizedHandler(null);
     };
   }, []);
 
-  // LOGIN
+  // LOGIN USING BACKEND API
   const signIn = useCallback(async (email, password) => {
-    const { data, error } =
-      await supabase.auth.signInWithPassword({
-        email,
-        password,
-      });
+    const data = await api.login({
+      email,
+      password,
+    });
 
-    if (error) {
-      throw error;
+    if (!data.token) {
+      throw new Error('Login failed: No token received.');
     }
 
-    return normalizeUser(data.user);
+    tokenStore.set(data.token);
+
+    try {
+      const profile = await api.me();
+      const loggedInUser = profile.user ?? profile;
+
+      setUser(loggedInUser);
+      return loggedInUser;
+    } catch (error) {
+      tokenStore.clear();
+      setUser(null);
+      throw error;
+    }
   }, []);
 
   // SIGN UP WITH CENSORSHIP
-  const signUp = useCallback(
-    async (name, email, password) => {
-      // Check for inappropriate words
-      // in name, email, and password
-      validateRegistration(name, email, password);
+  const signUp = useCallback(async (name, email, password) => {
+    validateRegistration(name, email, password);
 
-      // Proceed only if validation passes
-      const { data, error } =
-        await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: {
-              full_name: name,
-            },
-          },
-        });
+    const data = await api.register({
+      name,
+      email,
+      password,
+    });
 
-      if (error) {
+    if (data.token) {
+      tokenStore.set(data.token);
+
+      try {
+        const profile = await api.me();
+        const registeredUser = profile.user ?? profile;
+
+        setUser(registeredUser);
+
+        return {
+          user: registeredUser,
+          needsEmailConfirmation: false,
+        };
+      } catch (error) {
+        tokenStore.clear();
+        setUser(null);
         throw error;
       }
+    }
 
-      return {
-        user: normalizeUser(data.user),
-        needsEmailConfirmation: !data.session,
-      };
-    },
-    []
-  );
+    return {
+      user: data.user ?? null,
+      needsEmailConfirmation:
+        data.needsEmailConfirmation ?? false,
+    };
+  }, []);
 
   // LOGOUT
   const signOut = useCallback(async () => {
-    const { error } = await supabase.auth.signOut();
-
-    if (error) {
-      throw error;
+    try {
+      if (tokenStore.get()) {
+        await api.logout();
+      }
+    } catch (error) {
+      console.warn('Backend logout failed:', error);
+    } finally {
+      tokenStore.clear();
+      setUser(null);
     }
   }, []);
 
-  // AUTH CONTEXT VALUES
+  // AUTH CONTEXT
   const value = useMemo(
     () => ({
       user,
-      session,
+      session: null,
       loading,
       signIn,
       signUp,
       signOut,
     }),
-    [
-      user,
-      session,
-      loading,
-      signIn,
-      signUp,
-      signOut,
-    ]
+    [user, loading, signIn, signUp, signOut]
   );
 
   return (
