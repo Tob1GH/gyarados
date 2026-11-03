@@ -2,8 +2,24 @@
 // Replace it with your real API: keep the same routes and JSON shapes (see README.md).
 import http from 'node:http';
 import { randomUUID, randomBytes, scryptSync, timingSafeEqual } from 'node:crypto';
+import { createClient } from '@supabase/supabase-js';
 
 const PORT = process.env.PORT || 4000;
+
+const supabaseUrl = process.env.SUPABASE_URL;
+const supabaseKey = process.env.SUPABASE_PUBLISHABLE_KEY;
+
+if (!supabaseUrl || !supabaseKey) {
+  throw new Error('Missing Supabase backend environment variables');
+}
+
+const supabase = createClient(supabaseUrl, supabaseKey, {
+  auth: {
+    persistSession: false,
+    autoRefreshToken: false,
+  },
+});
+
 const day = 86400000;
 const ago = (d) => new Date(Date.now() - d * day).toISOString();
 const ahead = (d) => new Date(Date.now() + d * day).toISOString();
@@ -151,12 +167,50 @@ const server = http.createServer(async (req, res) => {
     return send(res, 201, { token: startSession(user), user: publicUser(user) });
   }
 
-  // ---- Everything below needs a signed-in user ----
-  const token = (req.headers.authorization || '').replace(/^Bearer /, '');
-  const me = sessions.get(token);
-  if (!me) return send(res, 401, { message: 'Please sign in to continue.' });
-  if (p === '/auth/me') return send(res, 200, publicUser(me));
-  if (p === '/auth/logout' && req.method === 'POST') { sessions.delete(token); return send(res, 204); }
+
+  // ---- Supabase Authentication ----
+
+  const authHeader = req.headers.authorization || '';
+  const match = authHeader.match(/^Bearer\s+(.+)$/i);
+
+  if (!match) {
+    return send(res, 401, {
+      message: 'Please sign in to continue.',
+    });
+  }
+
+  const token = match[1];
+  const { data, error } = await supabase.auth.getUser(token);
+
+  if (error || !data?.user) {
+    return send(res, 401, {
+      message: 'Invalid or expired authentication token.',
+    });
+  }
+
+  if (!data.user.email_confirmed_at) {
+    return send(res, 403, {
+      message: 'Please verify your email first.',
+    });
+  }
+
+  const me = {
+    id: data.user.id,
+    email: data.user.email,
+    name:
+      data.user.user_metadata?.full_name ||
+      data.user.email?.split('@')[0] ||
+      'Member',
+  };
+
+  if (p === '/auth/me') {
+    return send(res, 200, publicUser(me));
+  }
+
+  if (p === '/auth/logout' && req.method === 'POST') {
+    return send(res, 204);
+  }
+
 
   // GET /stats
   if (p === '/stats') {
