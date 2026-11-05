@@ -1,5 +1,8 @@
 import { useState } from 'react';
-import { api } from '../api/client.js';
+import {
+  getLoans,
+  returnBook,
+} from '../api/supabaseApi';
 import { useFetch } from '../hooks/useFetch.js';
 import { useToast } from '../components/Toast.jsx';
 import { EmptyState, ErrorState } from '../components/States.jsx';
@@ -17,13 +20,16 @@ export default function Loans() {
   const toast = useToast();
   const [status, setStatus] = useState('');
   const [busyId, setBusyId] = useState(null);
-  const loans = useFetch((s) => api.loans({ status }, s), [status]);
+  const loans = useFetch(
+  () => getLoans({ status }),
+  [status]
+);
   const items = loans.data?.items || [];
 
   const giveBack = async (loan) => {
     setBusyId(loan.id);
     try {
-      await api.returnLoan(loan.id);
+      await returnBook(loan.id);
       toast(`Returned “${loan.bookTitle}”`);
       loans.refetch();
     } catch (e) {

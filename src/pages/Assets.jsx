@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import { api } from '../api/client.js';
+import { getAssets } from '../api/supabaseApi';
 import { useFetch } from '../hooks/useFetch.js';
 import Icon from '../components/Icon.jsx';
 import AssetCard from '../components/AssetCard.jsx';
@@ -20,7 +20,10 @@ export default function Assets() {
   const [selected, setSelected] = useState(null);
   const [uploading, setUploading] = useState(false);
 
-  const assets = useFetch((s) => api.assets({ q, type }, s), [q, type]);
+  const assets = useFetch(
+  () => getAssets({ q, type }),
+  [q, type]
+);
   const items = assets.data?.items || [];
 
   const setType = (v) => {

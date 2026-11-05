@@ -15,6 +15,7 @@ const AuthCtx = createContext(null);
 
 export const useAuth = () => useContext(AuthCtx);
 
+// Basic information from Supabase Authentication
 function normalizeUser(user) {
   if (!user) return null;
 
@@ -25,11 +26,8 @@ function normalizeUser(user) {
       user.user_metadata?.full_name ||
       user.email?.split('@')[0] ||
       'Member',
+    role: null,
   };
-}
-
-function isVerified(user) {
-  return Boolean(user?.email_confirmed_at);
 }
 
 export function AuthProvider({ children }) {
@@ -37,150 +35,147 @@ export function AuthProvider({ children }) {
   const [session, setSession] = useState(null);
   const [loading, setLoading] = useState(true);
 
-  // CHECK EXISTING SUPABASE SESSION
-  useEffect(() => {
-    let active = true;
+  // Retrieve the user's profile, including their role
+  const fetchUserProfile = useCallback(async (authUser) => {
+    if (!authUser) return null;
 
-    async function checkSession() {
-      try {
-        const { data, error } =
-          await supabase.auth.getUser();
+    const { data, error } = await supabase
+      .from('profiles')
+      .select('full_name, email, role')
+      .eq('id', authUser.id)
+      .maybeSingle();
 
-        if (error && error.name !== 'AuthSessionMissingError') {
-          console.error('Authentication error:', error);
-        }
-
-        if (!active) return;
-
-        if (!isVerified(data?.user)) {
-          setUser(null);
-          setSession(null);
-          return;
-        }
-
-        const { data: sessionData } =
-          await supabase.auth.getSession();
-
-        if (!active) return;
-
-        setSession(sessionData.session);
-        setUser(normalizeUser(data.user));
-      } catch (error) {
-        console.error('Session check failed:', error);
-
-        if (active) {
-          setUser(null);
-          setSession(null);
-        }
-      } finally {
-        if (active) setLoading(false);
-      }
+    if (error) {
+      console.error('Profile loading error:', error);
+      return normalizeUser(authUser);
     }
 
-    checkSession();
-
-    const { data: listener } =
-      supabase.auth.onAuthStateChange(
-        (_event, newSession) => {
-          if (!active) return;
-
-          if (
-            newSession?.user &&
-            isVerified(newSession.user)
-          ) {
-            setSession(newSession);
-            setUser(normalizeUser(newSession.user));
-          } else {
-            setSession(null);
-            setUser(null);
-          }
-        }
-      );
-
-    return () => {
-      active = false;
-      listener.subscription.unsubscribe();
+    return {
+      id: authUser.id,
+      email: data?.email || authUser.email,
+      name:
+        data?.full_name ||
+        authUser.user_metadata?.full_name ||
+        authUser.email?.split('@')[0] ||
+        'Member',
+      role: data?.role || null,
     };
   }, []);
 
-  // LOGIN WITH EMAIL VERIFICATION CHECK
-  const signIn = useCallback(async (email, password) => {
-    const { data, error } =
-      await supabase.auth.signInWithPassword({
-        email: email.trim(),
-        password,
-      });
+  // Restore session and listen for authentication changes
+  useEffect(() => {
+    let mounted = true;
+    let requestId = 0;
 
-    if (error) {
-      if (
-        error.message?.toLowerCase().includes(
-          'email not confirmed'
-        )
-      ) {
-        throw new Error(
-          'Please verify your email before logging in.'
-        );
+    const loadSession = async (currentSession) => {
+      const currentRequest = ++requestId;
+
+      if (!mounted) return;
+
+      setSession(currentSession);
+
+      if (!currentSession?.user) {
+        setUser(null);
+        setLoading(false);
+        return;
       }
 
-      throw error;
-    }
+      setLoading(true);
 
-    if (!isVerified(data.user)) {
-      await supabase.auth.signOut();
-
-      setUser(null);
-      setSession(null);
-
-      throw new Error(
-        'Please verify your email before logging in.'
+      const profileUser = await fetchUserProfile(
+        currentSession.user
       );
-    }
 
-    const loggedInUser = normalizeUser(data.user);
+      if (!mounted || currentRequest !== requestId) return;
 
-    setSession(data.session);
-    setUser(loggedInUser);
+      setUser(profileUser);
+      setLoading(false);
+    };
 
-    return loggedInUser;
-  }, []);
+    const {
+      data: { subscription },
+    } = supabase.auth.onAuthStateChange(
+      (_event, currentSession) => {
+        // Run profile loading after the auth callback finishes
+        Promise.resolve().then(() => loadSession(currentSession));
+      }
+    );
 
-  // REGISTER WITH CENSORSHIP AND EMAIL VERIFICATION
-  const signUp = useCallback(
-    async (name, email, password) => {
-      validateRegistration(name, email, password);
+    // Restore existing session
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!mounted) return;
 
+      if (error) {
+        console.error('Session loading error:', error);
+        loadSession(null);
+      } else {
+        loadSession(data.session);
+      }
+    });
+
+    return () => {
+      mounted = false;
+      subscription.unsubscribe();
+    };
+  }, [fetchUserProfile]);
+
+  // LOGIN
+  const signIn = useCallback(
+    async (email, password) => {
       const { data, error } =
-        await supabase.auth.signUp({
-          email: email.trim(),
+        await supabase.auth.signInWithPassword({
+          email,
           password,
-          options: {
-            data: {
-              full_name: name.trim(),
-            },
-            emailRedirectTo:
-              `${window.location.origin}/login`,
-          },
         });
 
       if (error) throw error;
 
-      // Do not automatically log in after registration
-      if (data.session) {
-        await supabase.auth.signOut();
-      }
+      setSession(data.session);
 
-      setUser(null);
-      setSession(null);
+      const profileUser = await fetchUserProfile(data.user);
 
-      return {
-        user: normalizeUser(data.user),
-        needsEmailConfirmation: true,
-        message:
-          'Registration submitted! Please check your email and verify your account before logging in.',
-      };
+      setUser(profileUser);
+
+      return profileUser;
     },
-    []
+    [fetchUserProfile]
   );
+
+// REGISTER
+const signUp = useCallback(async (name, email, password) => {
+
+  // Check inappropriate words before registration
+  validateRegistration(name, email, password);
+
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: {
+        full_name: name,
+      },
+    },
+  });
+
+  if (error) throw error;
+
+  if (!data.session) {
+    return {
+      user: normalizeUser(data.user),
+      needsEmailConfirmation: true,
+    };
+  }
+
+  setSession(data.session);
+
+  const profileUser = await fetchUserProfile(data.user);
+  setUser(profileUser);
+
+  return {
+    user: profileUser,
+    needsEmailConfirmation: false,
+  };
+}, [fetchUserProfile]);
 
   // LOGOUT
   const signOut = useCallback(async () => {
@@ -188,11 +183,10 @@ export function AuthProvider({ children }) {
 
     if (error) throw error;
 
-    setUser(null);
     setSession(null);
+    setUser(null);
   }, []);
 
-  // AUTH CONTEXT
   const value = useMemo(
     () => ({
       user,
@@ -202,14 +196,7 @@ export function AuthProvider({ children }) {
       signUp,
       signOut,
     }),
-    [
-      user,
-      session,
-      loading,
-      signIn,
-      signUp,
-      signOut,
-    ]
+    [user, session, loading, signIn, signUp, signOut]
   );
 
   return (

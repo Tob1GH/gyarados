@@ -1,11 +1,13 @@
 import { useRef, useState } from 'react';
 import Icon from './Icon.jsx';
 import { formatBytes } from '../lib/format.js';
-import { api } from '../api/client.js';
+import { uploadAsset } from '../api/supabaseApi';
 import { useToast } from './Toast.jsx';
+import { useAuth } from '../context/AuthContext';
 
 export default function UploadModal({ onClose, onUploaded }) {
   const toast = useToast();
+  const { user } = useAuth();
   const input = useRef(null);
   const [file, setFile] = useState(null);
   const [title, setTitle] = useState('');
@@ -19,27 +21,35 @@ export default function UploadModal({ onClose, onUploaded }) {
     if (!title) setTitle(f.name.replace(/\.[^.]+$/, ''));
   };
 
-  const submit = async (e) => {
-    e.preventDefault();
-    if (!file) return;
-    setBusy(true);
-    const fd = new FormData();
-    fd.append('file', file);
-    fd.append('title', title || file.name);
-    fd.append('tags', tags);
-    fd.append('size', String(file.size));
-    fd.append('mime', file.type);
-    fd.append('filename', file.name);
-    try {
-      await api.uploadAsset(fd);
-      toast(`Uploaded “${title || file.name}”`);
-      onUploaded();
-      onClose();
-    } catch (err) {
-      toast(err.message, 'error');
-      setBusy(false);
-    }
-  };
+ 
+const submit = async (e) => {
+  e.preventDefault();
+  if (!file) return;
+
+  setBusy(true);
+
+  try {
+    const uploadedAsset = await uploadAsset(
+      {
+        file,
+        title: title || file.name,
+        tags: tags
+          .split(',')
+          .map((tag) => tag.trim())
+          .filter(Boolean),
+      },
+      user.id
+    );
+
+    toast(`Uploaded “${title || file.name}”`);
+    onUploaded(uploadedAsset);
+    onClose();
+  } catch (err) {
+    toast(err.message, 'error');
+    setBusy(false);
+  }
+};
+
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4" role="dialog" aria-modal="true" aria-label="Upload a file">

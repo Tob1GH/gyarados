@@ -1,9 +1,8 @@
-import { useState } from 'react';
-import { api } from '../api/client.js';
-import './Chatbot.css';
 
-const SUPABASE_URL = 'https://prbjvvuzimqrlbhdrcaq.supabase.co';
-const SUPABASE_PUBLISHABLE_KEY = 'sb_publishable_2tggeC0CbX4EygbE09rROw_lvhmvl2m';
+import { useState } from 'react';
+import { getBooks } from '../api/supabaseApi';
+import { supabase } from '../lib/supabaseClient';
+import './Chatbot.css';
 
 export default function Chatbot() {
   const [open, setOpen] = useState(false);
@@ -11,8 +10,8 @@ export default function Chatbot() {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      text: 'Hello! I am your Gyarados AI library assistant. Describe a book plot or ask me to find a digital asset.'
-    }
+      text: 'Hello! I am your Gyarados AI library assistant. Describe a book plot or ask me to find a digital asset.',
+    },
   ]);
   const [loading, setLoading] = useState(false);
 
@@ -22,68 +21,67 @@ export default function Chatbot() {
     const text = query.trim();
     if (!text || loading) return;
 
-    setMessages(previous => [
+    setMessages((previous) => [
       ...previous,
-      { role: 'user', text }
+      { role: 'user', text },
     ]);
+
     setQuery('');
     setLoading(true);
 
     try {
       try {
-        const response = await fetch(
-          `${SUPABASE_URL}/functions/v1/library-ai`,
+        const { data, error } = await supabase.functions.invoke(
+          'library-ai',
           {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              apikey: SUPABASE_PUBLISHABLE_KEY
-            },
-            body: JSON.stringify({
+            body: {
               action: 'search',
-              query: text
-            })
+              query: text,
+            },
           }
         );
 
-        const data = await response.json();
+        if (error) throw error;
 
-        if (!response.ok) {
-          throw new Error(data.error || data.message || `AI search failed (${response.status}).`);
-        }
-
-        setMessages(previous => [
+        setMessages((previous) => [
           ...previous,
           {
             role: 'assistant',
-            text: data.message || 'Here are your matching books.',
-            books: data.books || []
-          }
+            text: data?.message || 'Here are your matching books.',
+            books: data?.books || [],
+          },
         ]);
       } catch (aiError) {
-        console.warn('AI library search failed; falling back to catalog search:', aiError);
-        const { items } = await api.books({ q: text, limit: 5 });
+        console.warn(
+          'AI library search failed; falling back to catalog search:',
+          aiError
+        );
 
-        setMessages(previous => [
+        const { items } = await getBooks({
+          q: text,
+          limit: 5,
+        });
+
+        setMessages((previous) => [
           ...previous,
           {
             role: 'assistant',
             text: items.length
               ? 'AI search is unavailable, so here are catalog matches by title or author.'
               : 'AI search is unavailable, and no catalog matches were found by title or author.',
-            books: items
-          }
+            books: items,
+          },
         ]);
       }
     } catch (error) {
       console.error('Chatbot error:', error);
 
-      setMessages(previous => [
+      setMessages((previous) => [
         ...previous,
         {
           role: 'assistant',
-          text: `I could not search the library: ${error.message}`
-        }
+          text: `I could not search the library: ${error.message}`,
+        },
       ]);
     } finally {
       setLoading(false);
@@ -116,13 +114,17 @@ export default function Chatbot() {
                   {message.text}
                 </div>
 
-                {message.books?.map(book => (
-                  <article className="gyarados-book-result" key={book.id}>
+                {message.books?.map((book) => (
+                  <article
+                    className="gyarados-book-result"
+                    key={book.id}
+                  >
                     <strong>{book.title}</strong>
                     <p>By {book.author}</p>
                     <p>
                       {book.summary || book.description}
                     </p>
+
                     {book.category && (
                       <small>{book.category}</small>
                     )}
@@ -144,14 +146,17 @@ export default function Chatbot() {
           >
             <input
               value={query}
-              onChange={event => setQuery(event.target.value)}
+              onChange={(event) => setQuery(event.target.value)}
               placeholder="Describe a book plot..."
               maxLength={1000}
               aria-label="Describe a book plot"
               disabled={loading}
             />
 
-            <button type="submit" disabled={loading || !query.trim()}>
+            <button
+              type="submit"
+              disabled={loading || !query.trim()}
+            >
               Send
             </button>
           </form>
@@ -161,7 +166,7 @@ export default function Chatbot() {
       <button
         type="button"
         className="gyarados-chat-toggle"
-        onClick={() => setOpen(previous => !previous)}
+        onClick={() => setOpen((previous) => !previous)}
       >
         {open ? 'Close chat' : '✦ Ask Gyarados AI'}
       </button>
